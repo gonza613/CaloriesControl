@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { analyzeTextInput, analyzeNutritionLabel } from '@/lib/gemini'
-import { searchPersonalFood, saveFoodLog, savePersonalFood } from '@/lib/queries'
+import { searchPersonalFood, saveFoodLog, savePersonalFood, getUserProfile, getTodayTotals } from '@/lib/queries'
 
 // ============================================================
 // TIPOS
@@ -24,10 +24,14 @@ export async function processTextInput(text: string): Promise<ProcessInputResult
 
   if (!text.trim()) return { status: 'error', message: 'Escribí algo primero' }
 
+  // Obtener contexto del usuario (metas y consumo del día)
+  const profile = await getUserProfile(user.id)
+  const totals = await getTodayTotals(user.id)
+
   // PASO A: Enviar a Gemini para analizar la intención
   let geminiResult
   try {
-    geminiResult = await analyzeTextInput(text)
+    geminiResult = await analyzeTextInput(text, profile, totals)
   } catch (err) {
     console.error('Gemini error:', err)
     return { status: 'error', message: '⚠️ Error al conectar con la IA. Intentá de nuevo.' }

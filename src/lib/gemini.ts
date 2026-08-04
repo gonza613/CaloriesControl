@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, SchemaType, type Schema } from '@google/generative-ai'
+import type { UserProfile, DayTotals } from '@/lib/queries'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
@@ -70,7 +71,7 @@ const foodAnalysisSchema: Schema = {
 // ============================================================
 // ANALIZAR TEXTO — Gemini con Structured Output
 // ============================================================
-export async function analyzeTextInput(text: string): Promise<GeminiAnalysisResult> {
+export async function analyzeTextInput(text: string, profile: UserProfile, totals: DayTotals): Promise<GeminiAnalysisResult> {
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     generationConfig: {
@@ -81,6 +82,11 @@ export async function analyzeTextInput(text: string): Promise<GeminiAnalysisResu
 
   const systemPrompt = `Eres un asistente experto en nutrición integrado en una app de control calórico.
 Tu trabajo es analizar el texto del usuario y determinar su intención.
+
+CONTEXTO DEL USUARIO:
+- Metas Diarias: ${profile.meta_calorias} kcal, ${profile.meta_proteinas}g proteína, ${profile.meta_carbohidratos}g carbohidratos, ${profile.meta_grasas}g grasas.
+- Consumo de Hoy: ${Math.round(totals.total_calorias)} kcal consumidas (${Math.round(profile.meta_calorias - totals.total_calorias)} kcal restantes).
+Ten en cuenta este contexto al dar respuestas, consejos o responder preguntas sobre si algo es "mucho" o "poco".
 
 REGLAS:
 1. Si el usuario menciona que comió/bebió algo → intent: "log_food"
@@ -94,7 +100,7 @@ Para intent "log_food":
 - is_generic_food = false si es un producto empaquetado con marca o nombre específico
 - Si is_generic_food = true, estima los macros razonablemente para la porción mencionada o una porción estándar
 - Si is_generic_food = false, NO estimes macros (data = null)
-- response_text debe ser amigable, confirmar el registro con un emoji
+- response_text debe ser amigable, confirmar el registro con un emoji, y puede mencionar sutilmente el impacto en las metas de hoy.
 
 Para otros intents, response_text debe ser un mensaje útil y amigable en español.
 Las cantidades de macros deben ser números realistas y razonables.`
