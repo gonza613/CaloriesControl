@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
+import { GoogleGenerativeAI, SchemaType, type Schema } from '@google/generative-ai'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
@@ -30,7 +30,7 @@ export type GeminiAnalysisResult = {
 // ============================================================
 // SCHEMA JSON para Structured Outputs
 // ============================================================
-const foodAnalysisSchema = {
+const foodAnalysisSchema: Schema = {
   type: SchemaType.OBJECT,
   properties: {
     intent: {
@@ -71,7 +71,7 @@ const foodAnalysisSchema = {
 // ============================================================
 export async function analyzeTextInput(text: string): Promise<GeminiAnalysisResult> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: foodAnalysisSchema,
@@ -117,7 +117,7 @@ Las cantidades de macros deben ser números realistas y razonables.`
 // ============================================================
 // ANALIZAR FOTO DE TABLA NUTRICIONAL — Gemini Vision
 // ============================================================
-const nutritionLabelSchema = {
+const nutritionLabelSchema: Schema = {
   type: SchemaType.OBJECT,
   properties: {
     nombre_alimento: { type: SchemaType.STRING, description: 'Nombre del producto en la etiqueta' },
@@ -149,7 +149,7 @@ export async function analyzeNutritionLabel(
   foodNameHint?: string
 ): Promise<NutritionLabelResult> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: nutritionLabelSchema,
