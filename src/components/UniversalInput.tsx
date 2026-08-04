@@ -56,10 +56,37 @@ export default function UniversalInput() {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [pendingFoodName, setPendingFoodName] = useState<string | null>(null)
   const [showPhotoUpload, setShowPhotoUpload] = useState(false)
+  const [history, setHistory] = useState<{ role: string; parts: { text: string }[] }[]>([])
   const [isPending, startTransition] = useTransition()
   const fileRef = useRef<HTMLInputElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('calories_chat_history')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        const today = new Date().toLocaleDateString()
+        if (parsed.date === today && Array.isArray(parsed.messages)) {
+          setHistory(parsed.messages)
+        } else {
+          localStorage.removeItem('calories_chat_history')
+        }
+      } catch (e) {
+        console.error('Error loading history:', e)
+      }
+    }
+  }, [])
+
+  const updateHistory = (newMessages: { role: string; parts: { text: string }[] }[]) => {
+    setHistory(newMessages)
+    localStorage.setItem('calories_chat_history', JSON.stringify({
+      date: new Date().toLocaleDateString(),
+      messages: newMessages
+    }))
+  }
 
   const showToast = (result: ProcessInputResult) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -85,9 +112,23 @@ export default function UniversalInput() {
 
     const input = text.trim()
     setText('')
+    
+    // Optimistically prepare the new history with user input
+    const userMessage = { role: 'user', parts: [{ text: input }] }
+    const newHistory = [...history, userMessage]
 
     startTransition(async () => {
-      const result = await processTextInput(input)
+      // Pass only the last 10 messages to avoid large context and hallucinations
+      const historyToPass = history.slice(-10)
+      const result = await processTextInput(input, historyToPass)
+      
+      if (result.status !== 'error') {
+        // Only save successful/info responses to history
+        const modelMessage = { role: 'model', parts: [{ text: result.message }] }
+        // Store up to 20 messages (10 turns) in localStorage
+        updateHistory([...newHistory, modelMessage].slice(-20))
+      }
+      
       showToast(result)
     })
   }

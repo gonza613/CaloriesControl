@@ -71,15 +71,12 @@ const foodAnalysisSchema: Schema = {
 // ============================================================
 // ANALIZAR TEXTO — Gemini con Structured Output
 // ============================================================
-export async function analyzeTextInput(text: string, profile: UserProfile, totals: DayTotals): Promise<GeminiAnalysisResult> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: foodAnalysisSchema,
-    },
-  })
-
+export async function analyzeTextInput(
+  text: string,
+  profile: UserProfile,
+  totals: DayTotals,
+  history: { role: string; parts: { text: string }[] }[] = []
+): Promise<GeminiAnalysisResult> {
   const systemPrompt = `Eres un asistente experto en nutrición integrado en una app de control calórico.
 Tu trabajo es analizar el texto del usuario y determinar su intención.
 
@@ -105,7 +102,17 @@ Para intent "log_food":
 Para otros intents, response_text debe ser un mensaje útil y amigable en español.
 Las cantidades de macros deben ser números realistas y razonables.`
 
-  const result = await model.generateContent([systemPrompt, text])
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: systemPrompt,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: foodAnalysisSchema,
+    },
+  })
+
+  const chat = model.startChat({ history })
+  const result = await chat.sendMessage(text)
   const responseText = result.response.text()
 
   try {

@@ -17,7 +17,10 @@ export type ProcessInputResult =
 // ============================================================
 // ACTION: Procesar texto del Input Universal
 // ============================================================
-export async function processTextInput(text: string): Promise<ProcessInputResult> {
+export async function processTextInput(
+  text: string,
+  history: { role: string; parts: { text: string }[] }[] = []
+): Promise<ProcessInputResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', message: 'No autenticado' }
@@ -31,7 +34,7 @@ export async function processTextInput(text: string): Promise<ProcessInputResult
   // PASO A: Enviar a Gemini para analizar la intención
   let geminiResult
   try {
-    geminiResult = await analyzeTextInput(text, profile, totals)
+    geminiResult = await analyzeTextInput(text, profile, totals, history)
   } catch (err) {
     console.error('Gemini error:', err)
     return { status: 'error', message: '⚠️ Error al conectar con la IA. Intentá de nuevo.' }
