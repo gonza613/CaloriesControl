@@ -35,6 +35,7 @@ const foodAnalysisSchema: Schema = {
   properties: {
     intent: {
       type: SchemaType.STRING,
+      format: 'enum',
       enum: ['log_food', 'read_label', 'recommendation', 'need_more_info'],
       description: 'La intención del usuario',
     },
