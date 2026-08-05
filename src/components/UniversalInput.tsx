@@ -19,11 +19,13 @@ export default function UniversalInput() {
   const [chatOpen, setChatOpen] = useState(false)
   const [pendingFoodName, setPendingFoodName] = useState<string | null>(null)
   const [showPhotoUpload, setShowPhotoUpload] = useState(false)
+  const [productNameInput, setProductNameInput] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [isPending, startTransition] = useTransition()
   const fileRef = useRef<HTMLInputElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
+  const productNameRef = useRef<HTMLInputElement>(null)
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -114,13 +116,17 @@ export default function UniversalInput() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    // El nombre a usar: el que escribió el usuario en el panel, o el pendingFoodName del flujo need_photo
+    const nameHint = productNameInput.trim() || pendingFoodName || null
+
     setShowPhotoUpload(false)
-    addMessage('user', `📸 Foto de tabla nutricional${pendingFoodName ? ` (${pendingFoodName})` : ''}`)
+    setProductNameInput('')
+    addMessage('user', `📸 Foto${nameHint ? ` — ${nameHint}` : ' de tabla nutricional'}`)
 
     startTransition(async () => {
       const formData = new FormData()
       formData.append('image', file)
-      if (pendingFoodName) formData.append('food_name', pendingFoodName)
+      if (nameHint) formData.append('food_name', nameHint)
 
       const result = await processNutritionLabelPhoto(formData)
       addMessage('ai', result.message, result.status)
@@ -130,6 +136,17 @@ export default function UniversalInput() {
 
     if (photoRef.current) photoRef.current.value = ''
     if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const handleCameraButtonClick = () => {
+    // Abrir el panel de foto (con input de nombre) en lugar de abrir el file picker directamente
+    setShowPhotoUpload(true)
+    // Si viene del flujo need_photo, el productNameInput ya tiene el nombre sugerido
+    if (pendingFoodName && !productNameInput) {
+      setProductNameInput(pendingFoodName)
+    }
+    // Focus en el input de nombre después de que el panel aparezca
+    setTimeout(() => productNameRef.current?.focus(), 100)
   }
 
   const clearChat = () => {
@@ -221,39 +238,86 @@ export default function UniversalInput() {
             zIndex: 44,
             background: 'var(--color-surface)',
             borderTop: '1px solid var(--color-border)',
-            padding: '1rem',
+            padding: '1rem 1rem 1.25rem',
           }}
         >
           <div style={{ maxWidth: 480, margin: '0 auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>
-                📸 Subir foto de tabla nutricional
+                📸 Tabla nutricional
               </span>
               <button
-                onClick={() => { setShowPhotoUpload(false); setPendingFoodName(null) }}
+                onClick={() => { setShowPhotoUpload(false); setPendingFoodName(null); setProductNameInput('') }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)', display: 'flex' }}
+                aria-label="Cerrar"
               >
                 <X size={16} />
               </button>
             </div>
-            <button
-              onClick={() => photoRef.current?.click()}
-              style={{
-                width: '100%', padding: '1.25rem',
-                background: 'var(--color-surface-2)',
-                border: '2px dashed var(--color-border)',
-                borderRadius: 'var(--radius-lg)',
-                cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              <ImagePlus size={28} color="var(--color-primary)" />
-              <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Elegir foto</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
-                Tomá la foto de frente con buena iluminación
-              </span>
-            </button>
+
+            {/* Product name input */}
+            <div style={{ marginBottom: '0.875rem' }}>
+              <label
+                htmlFor="input-product-name"
+                style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', marginBottom: '0.375rem' }}
+              >
+                Nombre del producto
+              </label>
+              <input
+                ref={productNameRef}
+                id="input-product-name"
+                className="edit-field-input"
+                type="text"
+                placeholder='Ej: "Galletitas Oreo", "Yogur Danone frutilla"'
+                value={productNameInput}
+                onChange={e => setProductNameInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && photoRef.current?.click()}
+                autoCapitalize="words"
+                autoComplete="off"
+              />
+              <p style={{ fontSize: '0.7rem', color: 'var(--color-text-subtle)', marginTop: '0.3rem' }}>
+                Opcional — ayuda a identificar el producto correctamente
+              </p>
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '0.625rem' }}>
+              <button
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  flex: 1, padding: '0.875rem 0.5rem',
+                  background: 'var(--color-surface-2)',
+                  border: '1.5px solid var(--color-border)',
+                  borderRadius: 'var(--radius-lg)',
+                  cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.375rem',
+                  color: 'var(--color-text-muted)',
+                  transition: 'border-color 0.15s ease',
+                }}
+                aria-label="Sacar foto con cámara"
+              >
+                <Camera size={22} style={{ color: 'var(--color-primary)' }} />
+                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cámara</span>
+              </button>
+              <button
+                onClick={() => photoRef.current?.click()}
+                style={{
+                  flex: 1, padding: '0.875rem 0.5rem',
+                  background: 'var(--color-surface-2)',
+                  border: '1.5px solid var(--color-border)',
+                  borderRadius: 'var(--radius-lg)',
+                  cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.375rem',
+                  color: 'var(--color-text-muted)',
+                  transition: 'border-color 0.15s ease',
+                }}
+                aria-label="Elegir foto de galería"
+              >
+                <ImagePlus size={22} style={{ color: 'var(--color-primary)' }} />
+                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Galería</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -265,10 +329,10 @@ export default function UniversalInput() {
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoUpload} style={{ display: 'none' }} aria-hidden="true" />
           <input ref={photoRef} type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} aria-hidden="true" />
 
-          {/* Camera button */}
+          {/* Camera button — abre el panel con input de nombre */}
           <button
             className="camera-btn"
-            onClick={() => fileRef.current?.click()}
+            onClick={handleCameraButtonClick}
             disabled={isPending}
             title="Subir foto de tabla nutricional"
             aria-label="Subir foto"
