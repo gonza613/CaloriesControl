@@ -116,7 +116,7 @@ export async function searchPersonalFood(
 
 /**
  * Guarda un alimento en el diccionario personal.
- * Si ya existe uno con el mismo nombre, lo actualiza.
+ * Si ya existe con el mismo nombre, actualiza sus nutrientes (upsert).
  */
 export async function savePersonalFood(
   userId: string,
@@ -126,7 +126,10 @@ export async function savePersonalFood(
 
   const { data, error } = await supabase
     .from('personal_foods')
-    .insert({ user_id: userId, ...food })
+    .upsert(
+      { user_id: userId, ...food },
+      { onConflict: 'user_id,nombre_alimento', ignoreDuplicates: false }
+    )
     .select()
     .single()
 

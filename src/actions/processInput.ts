@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { analyzeTextInput, analyzeNutritionLabel } from '@/lib/gemini'
 import { searchPersonalFood, saveFoodLog, savePersonalFood, getUserProfile, getTodayTotals } from '@/lib/queries'
+import { searchOpenFoodFacts } from '@/lib/openFoodFacts'
 
 // ============================================================
 // TIPOS
@@ -31,7 +32,7 @@ export async function processTextInput(
   const profile = await getUserProfile(user.id)
   const totals = await getTodayTotals(user.id)
 
-  // PASO A: Enviar a Gemini para analizar la intención
+  // ─── PASO A: Gemini analiza la intención ───────────────────────────────────
   let geminiResult
   try {
     geminiResult = await analyzeTextInput(text, profile, totals, history)
@@ -40,16 +41,17 @@ export async function processTextInput(
     return { status: 'error', message: '⚠️ Error al conectar con la IA. Intentá de nuevo.' }
   }
 
-  // Si no es log_food, devolver el mensaje de Gemini
   if (geminiResult.intent !== 'log_food') {
     return { status: 'info', message: geminiResult.response_text }
   }
 
-  // PASO B: Buscar el alimento en el diccionario personal del usuario
-  const personalFood = await searchPersonalFood(user.id, geminiResult.extracted_food_name)
+  const foodName = geminiResult.extracted_food_name
+
+  // ─── PASO B: Buscar en diccionario personal ────────────────────────────────
+  const personalFood = await searchPersonalFood(user.id, foodName)
 
   if (personalFood) {
-    // ✅ CASO 1: Encontrado en memoria — usar esos macros exactos
+    // ✅ Encontrado en memoria — usar macros exactos guardados
     await saveFoodLog(user.id, {
       nombre_alimento: personalFood.nombre_alimento,
       calorias: personalFood.calorias,
@@ -63,29 +65,20 @@ export async function processTextInput(
     revalidatePath('/dashboard')
     return {
       status: 'logged',
-      message: `🧠 Registrado desde tu memoria: **${personalFood.nombre_alimento}** — ${Math.round(personalFood.calorias)} kcal`,
+      message: `🧠 **${personalFood.nombre_alimento}** — ${Math.round(personalFood.calorias)} kcal (de tu diccionario)`,
       foodName: personalFood.nombre_alimento,
     }
   }
 
-  // PASO C: No encontrado en memoria
+  // ─── PASO C: Alimento genérico → Gemini estima fresco (no guarda en memoria) ─
+  // Para genéricos (manzana, pollo, arroz) Gemini ya calculó los macros según
+  // la cantidad mencionada. NO los guardamos en el diccionario porque la próxima
+  // vez puede ser una cantidad diferente.
   if (geminiResult.is_generic_food && geminiResult.data) {
-    // ✅ CASO 2: Alimento genérico — usar estimación de Gemini
     const { calorias, proteinas, carbohidratos, grasas, porcion_gramos } = geminiResult.data
 
     await saveFoodLog(user.id, {
-      nombre_alimento: geminiResult.extracted_food_name,
-      calorias,
-      proteinas,
-      carbohidratos,
-      grasas,
-      porcion_gramos,
-      fuente: 'gemini_estimado',
-    })
-
-    // También guardar en el diccionario personal para futuras búsquedas
-    await savePersonalFood(user.id, {
-      nombre_alimento: geminiResult.extracted_food_name,
+      nombre_alimento: foodName,
       calorias,
       proteinas,
       carbohidratos,
@@ -97,16 +90,53 @@ export async function processTextInput(
     revalidatePath('/dashboard')
     return {
       status: 'logged',
-      message: geminiResult.response_text || `✅ Registrado: **${geminiResult.extracted_food_name}** — ~${Math.round(calorias)} kcal estimadas`,
-      foodName: geminiResult.extracted_food_name,
+      message: geminiResult.response_text || `✅ **${foodName}** — ~${Math.round(calorias)} kcal estimadas`,
+      foodName,
     }
   }
 
-  // ❌ CASO 3: Producto empaquetado específico sin datos — pedir foto
+  // ─── PASO D: Producto de marca → buscar en Open Food Facts ────────────────
+  const offResult = await searchOpenFoodFacts(foodName)
+
+  if (offResult.found) {
+    const { nombre_alimento, nutriments } = offResult
+    const { calorias, proteinas, carbohidratos, grasas, porcion_gramos } = nutriments
+
+    // Guardar en diccionario personal para futuras búsquedas
+    await savePersonalFood(user.id, {
+      nombre_alimento,
+      calorias,
+      proteinas,
+      carbohidratos,
+      grasas,
+      porcion_gramos,
+      fuente: 'openfoodfacts',
+    })
+
+    // Registrar en el diario
+    await saveFoodLog(user.id, {
+      nombre_alimento,
+      calorias,
+      proteinas,
+      carbohidratos,
+      grasas,
+      porcion_gramos,
+      fuente: 'openfoodfacts',
+    })
+
+    revalidatePath('/dashboard')
+    return {
+      status: 'logged',
+      message: `🌐 **${nombre_alimento}** — ${Math.round(calorias)} kcal (Open Food Facts). Guardado en tu diccionario.`,
+      foodName: nombre_alimento,
+    }
+  }
+
+  // ─── PASO E: No encontrado en ninguna fuente → pedir foto ─────────────────
   return {
     status: 'need_photo',
-    message: `📸 No tengo guardado **${geminiResult.extracted_food_name}** en tu diccionario. ¿Podés subir una foto de la tabla nutricional para guardarlo para siempre?`,
-    foodName: geminiResult.extracted_food_name,
+    message: `📸 No encontré **${foodName}** en tu diccionario ni en internet. ¿Podés subir la foto de la tabla nutricional?`,
+    foodName,
   }
 }
 
@@ -160,7 +190,7 @@ export async function processNutritionLabelPhoto(
 
   const { nombre_alimento, calorias, proteinas, carbohidratos, grasas, porcion_gramos } = labelResult
 
-  // Guardar en el diccionario personal (para siempre)
+  // Guardar en el diccionario personal (para siempre, hace upsert si ya existe)
   await savePersonalFood(user.id, {
     nombre_alimento,
     calorias,
@@ -185,7 +215,7 @@ export async function processNutritionLabelPhoto(
   revalidatePath('/dashboard')
   return {
     status: 'logged',
-    message: `✅ ¡**${nombre_alimento}** guardado en tu diccionario! — ${Math.round(calorias)} kcal por porción. Registrado en tu diario.`,
+    message: `✅ **${nombre_alimento}** — ${Math.round(calorias)} kcal por porción. Guardado en tu diccionario.`,
     foodName: nombre_alimento,
   }
 }

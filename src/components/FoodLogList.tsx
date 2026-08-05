@@ -41,6 +41,13 @@ function SourceBadge({ fuente }: { fuente: string }) {
       </span>
     )
   }
+  if (fuente === 'openfoodfacts') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--color-carbs)', fontWeight: 600 }}>
+        🌐 OFF
+      </span>
+    )
+  }
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--color-text-subtle)', fontWeight: 600 }}>
       <Sparkles size={10} /> IA
