@@ -77,30 +77,26 @@ export async function analyzeTextInput(
   totals: DayTotals,
   history: { role: string; parts: { text: string }[] }[] = []
 ): Promise<GeminiAnalysisResult> {
-  const systemPrompt = `Eres un asistente experto en nutrición integrado en una app de control calórico.
-Tu trabajo es analizar el texto del usuario y determinar su intención.
+  const systemPrompt = `Eres un asistente de nutrición en una app de control calórico. Respondés en español, de forma MUY BREVE y directa. Máximo 1-2 oraciones en response_text. Sin introducciones ni frases de relleno.
 
-CONTEXTO DEL USUARIO:
-- Metas Diarias: ${profile.meta_calorias} kcal, ${profile.meta_proteinas}g proteína, ${profile.meta_carbohidratos}g carbohidratos, ${profile.meta_grasas}g grasas.
-- Consumo de Hoy: ${Math.round(totals.total_calorias)} kcal consumidas (${Math.round(profile.meta_calorias - totals.total_calorias)} kcal restantes).
-Ten en cuenta este contexto al dar respuestas, consejos o responder preguntas sobre si algo es "mucho" o "poco".
+CONTEXTO:
+- Metas: ${profile.meta_calorias} kcal | ${profile.meta_proteinas}g prot | ${profile.meta_carbohidratos}g carbs | ${profile.meta_grasas}g grasas
+- Hoy: ${Math.round(totals.total_calorias)} kcal consumidas, ${Math.round(profile.meta_calorias - totals.total_calorias)} restantes
 
 REGLAS:
-1. Si el usuario menciona que comió/bebió algo → intent: "log_food"
-2. Si menciona querer escanear o leer una etiqueta nutricional → intent: "read_label"
-3. Si pide recomendaciones o consejos → intent: "recommendation"
-4. Si el mensaje no es claro → intent: "need_more_info"
+1. Usuario menciona que comió/bebió algo → intent: "log_food"
+2. Quiere escanear etiqueta → intent: "read_label"
+3. Pide recomendaciones/consejos → intent: "recommendation"
+4. Mensaje no claro → intent: "need_more_info"
 
-Para intent "log_food":
-- Extrae el nombre del alimento en español, limpio y conciso (ej: "barra de cereal Granix", "manzana", "pollo a la plancha")
-- is_generic_food = true SOLO si es un alimento genérico sin marca (manzana, arroz, pollo, huevo, banana, yogur natural, etc.)
-- is_generic_food = false si es un producto empaquetado con marca o nombre específico
-- Si is_generic_food = true, estima los macros razonablemente para la porción mencionada o una porción estándar
-- Si is_generic_food = false, NO estimes macros (data = null)
-- response_text debe ser amigable, confirmar el registro con un emoji, y puede mencionar sutilmente el impacto en las metas de hoy.
+Para "log_food":
+- Extrae nombre limpio y conciso del alimento
+- is_generic_food = true solo si NO tiene marca específica (manzana, arroz, pollo, huevo, etc.)
+- Si is_generic_food = true → estima macros para la porción mencionada o porción estándar
+- Si is_generic_food = false → data = null
+- response_text: MUY CORTO. Ej: "✅ Manzana registrada — ~95 kcal" o "✅ 2 huevos registrados — ~140 kcal, te quedan ${Math.round(profile.meta_calorias - totals.total_calorias)} kcal"
 
-Para otros intents, response_text debe ser un mensaje útil y amigable en español.
-Las cantidades de macros deben ser números realistas y razonables.`
+Para otros intents, response_text breve y útil. Sin emojis en exceso.`
 
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
@@ -170,20 +166,19 @@ export async function analyzeNutritionLabel(
     },
   })
 
-  const prompt = `Analiza esta imagen de tabla nutricional y extrae la información.
-${foodNameHint ? `El alimento debería ser: ${foodNameHint}` : ''}
+  const prompt = `Analizá esta imagen de tabla nutricional y extraé la información nutricional.
+${foodNameHint ? `El alimento es: ${foodNameHint}` : ''}
 
-Extrae:
+Necesito:
 1. Nombre del producto
-2. Calorías por porción (en kcal)
-3. Proteínas por porción (en gramos)
-4. Carbohidratos totales por porción (en gramos)  
-5. Grasas totales por porción (en gramos)
-6. Tamaño de porción (en gramos)
+2. Calorías POR PORCIÓN (kcal)
+3. Proteínas POR PORCIÓN (g)
+4. Carbohidratos totales POR PORCIÓN (g)
+5. Grasas totales POR PORCIÓN (g)
+6. Tamaño de porción (g)
 
-Si no podés leer claramente la tabla nutricional, indica success: false con un mensaje explicativo.
-Si la imagen no es una tabla nutricional, indica success: false.
-Usa los valores POR PORCIÓN, no por 100g.`
+Si la imagen no es legible o no es una tabla nutricional → success: false con error_message explicativo.
+Usá siempre valores POR PORCIÓN, nunca por 100g.`
 
   const result = await model.generateContent([
     prompt,

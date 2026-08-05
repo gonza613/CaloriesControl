@@ -127,10 +127,20 @@ export async function processNutritionLabelPhoto(
     return { status: 'error', message: 'No se recibió imagen' }
   }
 
-  // Convertir File a base64
-  const bytes = await file.arrayBuffer()
-  const base64 = Buffer.from(bytes).toString('base64')
-  const mimeType = file.type || 'image/jpeg'
+  // Convertir File a base64 — usar arrayBuffer con manejo explícito
+  let base64: string
+  let mimeType: string
+  try {
+    const arrayBuffer = await file.arrayBuffer()
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+      return { status: 'error', message: '❌ La imagen está vacía o no se pudo leer. Intentá de nuevo.' }
+    }
+    base64 = Buffer.from(arrayBuffer).toString('base64')
+    mimeType = file.type || 'image/jpeg'
+  } catch (err) {
+    console.error('Error leyendo imagen:', err)
+    return { status: 'error', message: '❌ No se pudo leer la imagen. Intentá con otra foto.' }
+  }
 
   // Analizar la foto con Gemini Vision
   let labelResult
@@ -138,7 +148,7 @@ export async function processNutritionLabelPhoto(
     labelResult = await analyzeNutritionLabel(base64, mimeType, foodNameHint ?? undefined)
   } catch (err) {
     console.error('Gemini Vision error:', err)
-    return { status: 'error', message: '⚠️ Error al analizar la imagen. Intentá de nuevo.' }
+    return { status: 'error', message: '⚠️ Error al analizar la imagen. Verificá tu conexión e intentá de nuevo.' }
   }
 
   if (!labelResult.success) {

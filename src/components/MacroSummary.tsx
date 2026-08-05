@@ -89,8 +89,9 @@ type Props = {
 
 export default function MacroSummary({ profile, totals }: Props) {
   const today = new Date()
-  const dayName = today.toLocaleDateString('es-AR', { weekday: 'long' })
-  const dateStr = today.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
+  const TZ = 'America/Argentina/Buenos_Aires'
+  const dayName = today.toLocaleDateString('es-AR', { weekday: 'long', timeZone: TZ })
+  const dateStr = today.toLocaleDateString('es-AR', { day: 'numeric', month: 'long', timeZone: TZ })
 
   return (
     <div className="card animate-fade-in" style={{ marginBottom: '1.25rem' }}>

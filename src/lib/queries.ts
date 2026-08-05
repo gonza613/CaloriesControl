@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getArgentinaTodayStart } from '@/lib/timezone'
 
 // ============================================================
 // TIPOS
@@ -157,23 +158,21 @@ export async function listPersonalFoods(userId: string): Promise<PersonalFood[]>
 // ============================================================
 
 /**
- * Obtiene todos los registros de comidas del día actual.
+ * Obtiene todos los registros de comidas del día actual (en timezone Argentina).
  */
 export async function getTodayFoodLogs(userId: string): Promise<FoodLog[]> {
   const supabase = await createClient()
 
-  // Rango del día en UTC (ajustar si se necesita timezone específico)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  // Rango del día en Argentina (UTC-3, sin DST)
+  const todayStart = getArgentinaTodayStart()
+  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
 
   const { data } = await supabase
     .from('food_logs')
     .select('*')
     .eq('user_id', userId)
-    .gte('fecha', today.toISOString())
-    .lt('fecha', tomorrow.toISOString())
+    .gte('fecha', todayStart.toISOString())
+    .lt('fecha', tomorrowStart.toISOString())
     .order('fecha', { ascending: false })
 
   return (data ?? []) as FoodLog[]
@@ -238,6 +237,73 @@ export async function deleteFoodLog(userId: string, logId: string): Promise<bool
     .from('food_logs')
     .delete()
     .eq('id', logId)
+    .eq('user_id', userId)
+
+  return !error
+}
+
+/**
+ * Actualiza un registro del diario de comidas.
+ */
+export async function updateFoodLog(
+  userId: string,
+  logId: string,
+  data: {
+    nombre_alimento: string
+    calorias: number
+    proteinas: number
+    carbohidratos: number
+    grasas: number
+    porcion_gramos?: number
+  }
+): Promise<boolean> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('food_logs')
+    .update(data)
+    .eq('id', logId)
+    .eq('user_id', userId)
+
+  return !error
+}
+
+/**
+ * Actualiza un alimento del diccionario personal.
+ */
+export async function updatePersonalFood(
+  userId: string,
+  foodId: string,
+  data: {
+    nombre_alimento: string
+    calorias: number
+    proteinas: number
+    carbohidratos: number
+    grasas: number
+    porcion_gramos: number
+  }
+): Promise<boolean> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('personal_foods')
+    .update(data)
+    .eq('id', foodId)
+    .eq('user_id', userId)
+
+  return !error
+}
+
+/**
+ * Elimina un alimento del diccionario personal.
+ */
+export async function deletePersonalFood(userId: string, foodId: string): Promise<boolean> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('personal_foods')
+    .delete()
+    .eq('id', foodId)
     .eq('user_id', userId)
 
   return !error

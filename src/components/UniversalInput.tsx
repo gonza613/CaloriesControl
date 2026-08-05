@@ -1,66 +1,29 @@
 'use client'
 
 import { useState, useRef, useTransition, useEffect } from 'react'
-import { processTextInput, processNutritionLabelPhoto, ProcessInputResult } from '@/actions/processInput'
-import { Send, Camera, X, Image, Loader2, CheckCircle2, AlertCircle, Info, ImagePlus } from 'lucide-react'
+import { processTextInput, processNutritionLabelPhoto } from '@/actions/processInput'
+import { Send, Camera, X, Image, Loader2, ImagePlus, MessageSquare, ChevronDown } from 'lucide-react'
 
-type ToastState = ProcessInputResult & { id: number }
-
-function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
-  const isLogged = toast.status === 'logged'
-  const isNeedPhoto = toast.status === 'need_photo'
-  const isError = toast.status === 'error'
-
-  const colorClass = isLogged ? 'success' : isNeedPhoto ? 'warning' : isError ? 'error' : 'info'
-  const Icon = isLogged ? CheckCircle2 : isNeedPhoto ? Camera : isError ? AlertCircle : Info
-  const iconColor = isLogged
-    ? 'var(--color-success)'
-    : isNeedPhoto
-    ? 'var(--color-warning)'
-    : isError
-    ? 'var(--color-danger)'
-    : 'var(--color-carbs)'
-
-  // Parse markdown bold
-  const renderMessage = (text: string) => {
-    const parts = text.split(/\*\*(.*?)\*\*/g)
-    return parts.map((part, i) =>
-      i % 2 === 1 ? <strong key={i} style={{ color: 'var(--color-text)', fontWeight: 700 }}>{part}</strong> : part
-    )
-  }
-
-  return (
-    <div className={`ai-toast ${colorClass}`}>
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-        <Icon size={18} style={{ color: iconColor, flexShrink: 0, marginTop: '0.1rem' }} />
-        <p style={{ flex: 1, fontSize: '0.9rem', lineHeight: 1.5, color: 'var(--color-text-muted)' }}>
-          {renderMessage(toast.message)}
-        </p>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--color-text-subtle)', flexShrink: 0, display: 'flex',
-          }}
-          aria-label="Cerrar"
-        >
-          <X size={16} />
-        </button>
-      </div>
-    </div>
-  )
+type ChatMessage = {
+  role: 'user' | 'ai'
+  text: string
+  status?: 'logged' | 'need_photo' | 'info' | 'error'
+  id: number
 }
+
+type HistoryEntry = { role: string; parts: { text: string }[] }
 
 export default function UniversalInput() {
   const [text, setText] = useState('')
-  const [toast, setToast] = useState<ToastState | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatOpen, setChatOpen] = useState(false)
   const [pendingFoodName, setPendingFoodName] = useState<string | null>(null)
   const [showPhotoUpload, setShowPhotoUpload] = useState(false)
-  const [history, setHistory] = useState<{ role: string; parts: { text: string }[] }[]>([])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
   const [isPending, startTransition] = useTransition()
   const fileRef = useRef<HTMLInputElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const chatBottomRef = useRef<HTMLDivElement>(null)
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -71,6 +34,16 @@ export default function UniversalInput() {
         const today = new Date().toLocaleDateString()
         if (parsed.date === today && Array.isArray(parsed.messages)) {
           setHistory(parsed.messages)
+          // Convert history to chat bubbles
+          const bubbles: ChatMessage[] = parsed.messages.map((m: HistoryEntry, i: number) => ({
+            role: m.role === 'user' ? 'user' : 'ai',
+            text: m.parts[0]?.text ?? '',
+            id: i,
+          }))
+          if (bubbles.length > 0) {
+            setChatMessages(bubbles)
+            setChatOpen(true)
+          }
         } else {
           localStorage.removeItem('calories_chat_history')
         }
@@ -80,7 +53,14 @@ export default function UniversalInput() {
     }
   }, [])
 
-  const updateHistory = (newMessages: { role: string; parts: { text: string }[] }[]) => {
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatOpen && chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [chatMessages, chatOpen, isPending])
+
+  const updateHistory = (newMessages: HistoryEntry[]) => {
     setHistory(newMessages)
     localStorage.setItem('calories_chat_history', JSON.stringify({
       date: new Date().toLocaleDateString(),
@@ -88,23 +68,10 @@ export default function UniversalInput() {
     }))
   }
 
-  const showToast = (result: ProcessInputResult) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ ...result, id: Date.now() })
-
-    // Auto-dismiss logged confirmations after 4s
-    if (result.status === 'logged') {
-      toastTimerRef.current = setTimeout(() => setToast(null), 4000)
-    }
+  const addMessage = (role: 'user' | 'ai', text: string, status?: ChatMessage['status']) => {
+    setChatMessages(prev => [...prev, { role, text, status, id: Date.now() }])
+    setChatOpen(true)
   }
-
-  // When need_photo, store the pending food name and show upload area
-  useEffect(() => {
-    if (toast?.status === 'need_photo' && 'foodName' in toast) {
-      setPendingFoodName(toast.foodName)
-      setShowPhotoUpload(true)
-    }
-  }, [toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -112,24 +79,27 @@ export default function UniversalInput() {
 
     const input = text.trim()
     setText('')
-    
-    // Optimistically prepare the new history with user input
-    const userMessage = { role: 'user', parts: [{ text: input }] }
-    const newHistory = [...history, userMessage]
+
+    addMessage('user', input)
+
+    const historyToPass = history.slice(-10)
+    const userEntry: HistoryEntry = { role: 'user', parts: [{ text: input }] }
+    const newHistory = [...history, userEntry]
 
     startTransition(async () => {
-      // Pass only the last 10 messages to avoid large context and hallucinations
-      const historyToPass = history.slice(-10)
       const result = await processTextInput(input, historyToPass)
-      
+
+      addMessage('ai', result.message, result.status)
+
       if (result.status !== 'error') {
-        // Only save successful/info responses to history
-        const modelMessage = { role: 'model', parts: [{ text: result.message }] }
-        // Store up to 20 messages (10 turns) in localStorage
-        updateHistory([...newHistory, modelMessage].slice(-20))
+        const modelEntry: HistoryEntry = { role: 'model', parts: [{ text: result.message }] }
+        updateHistory([...newHistory, modelEntry].slice(-20))
       }
-      
-      showToast(result)
+
+      if (result.status === 'need_photo' && 'foodName' in result) {
+        setPendingFoodName(result.foodName)
+        setShowPhotoUpload(true)
+      }
     })
   }
 
@@ -145,64 +115,103 @@ export default function UniversalInput() {
     if (!file) return
 
     setShowPhotoUpload(false)
-    setToast(null)
+    addMessage('user', `📸 Foto de tabla nutricional${pendingFoodName ? ` (${pendingFoodName})` : ''}`)
 
     startTransition(async () => {
       const formData = new FormData()
       formData.append('image', file)
-      if (pendingFoodName) {
-        formData.append('food_name', pendingFoodName)
-      }
+      if (pendingFoodName) formData.append('food_name', pendingFoodName)
 
       const result = await processNutritionLabelPhoto(formData)
-      showToast(result)
-      if (result.status === 'logged') {
-        setPendingFoodName(null)
-      }
+      addMessage('ai', result.message, result.status)
+
+      if (result.status === 'logged') setPendingFoodName(null)
     })
 
-    // Reset the input
     if (photoRef.current) photoRef.current.value = ''
+    if (fileRef.current) fileRef.current.value = ''
   }
 
-  const handleCameraClick = () => {
-    fileRef.current?.click()
+  const clearChat = () => {
+    setChatMessages([])
+    setChatOpen(false)
+    setHistory([])
+    localStorage.removeItem('calories_chat_history')
+  }
+
+  // Strip markdown bold for display
+  const renderText = (text: string) => {
+    const parts = text.split(/\*\*(.*?)\*\*/g)
+    return parts.map((part, i) =>
+      i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+    )
+  }
+
+  const getBubbleAccent = (status?: ChatMessage['status']) => {
+    if (status === 'logged') return 'var(--color-success)'
+    if (status === 'need_photo') return 'var(--color-warning)'
+    if (status === 'error') return 'var(--color-danger)'
+    return 'var(--color-primary)'
   }
 
   return (
     <>
-      {/* Toast notification */}
-      {toast && (
-        <Toast toast={toast} onClose={() => { setToast(null); if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }} />
-      )}
+      {/* ── Chat Panel ───────────────────────────────────────────────── */}
+      {chatOpen && chatMessages.length > 0 && (
+        <div className="chat-panel">
+          <div className="chat-panel-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <MessageSquare size={14} style={{ color: 'var(--color-primary)' }} />
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Asistente
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
+              <button
+                className="chat-panel-btn"
+                onClick={() => setChatOpen(false)}
+                title="Minimizar"
+                aria-label="Minimizar chat"
+              >
+                <ChevronDown size={14} />
+              </button>
+              <button
+                className="chat-panel-btn"
+                onClick={clearChat}
+                title="Limpiar chat"
+                aria-label="Limpiar chat"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
 
-      {/* Loading indicator */}
-      {isPending && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 'calc(var(--nav-height) + var(--input-bar-height) + 0.75rem)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 50,
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-full)',
-            padding: '0.5rem 1rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            boxShadow: 'var(--shadow-md)',
-          }}
-        >
-          <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-          Analizando con IA...
+          <div className="chat-messages">
+            {chatMessages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`chat-bubble ${msg.role}`}
+                style={msg.role === 'ai' ? {
+                  borderLeft: `2px solid ${getBubbleAccent(msg.status)}`,
+                } : {}}
+              >
+                {renderText(msg.text)}
+              </div>
+            ))}
+
+            {/* Loading indicator */}
+            {isPending && (
+              <div className="chat-bubble ai loading">
+                <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
+                <span>Analizando...</span>
+              </div>
+            )}
+            <div ref={chatBottomRef} />
+          </div>
         </div>
       )}
 
-      {/* Photo upload area (when need_photo) */}
+      {/* ── Photo Upload Sheet ────────────────────────────────────────── */}
       {showPhotoUpload && (
         <div
           style={{
@@ -221,7 +230,7 @@ export default function UniversalInput() {
                 📸 Subir foto de tabla nutricional
               </span>
               <button
-                onClick={() => { setShowPhotoUpload(false); setPendingFoodName(null); setToast(null) }}
+                onClick={() => { setShowPhotoUpload(false); setPendingFoodName(null) }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)', display: 'flex' }}
               >
                 <X size={16} />
@@ -230,18 +239,13 @@ export default function UniversalInput() {
             <button
               onClick={() => photoRef.current?.click()}
               style={{
-                width: '100%',
-                padding: '1.25rem',
+                width: '100%', padding: '1.25rem',
                 background: 'var(--color-surface-2)',
                 border: '2px dashed var(--color-border)',
                 borderRadius: 'var(--radius-lg)',
                 cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '0.5rem',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
                 color: 'var(--color-text-muted)',
-                transition: 'border-color 0.15s ease',
               }}
             >
               <ImagePlus size={28} color="var(--color-primary)" />
@@ -254,32 +258,17 @@ export default function UniversalInput() {
         </div>
       )}
 
-      {/* Universal Input Bar */}
+      {/* ── Input Bar ─────────────────────────────────────────────────── */}
       <div className="input-bar">
         <div className="input-bar-inner">
           {/* Hidden file inputs */}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handlePhotoUpload}
-            style={{ display: 'none' }}
-            aria-hidden="true"
-          />
-          <input
-            ref={photoRef}
-            type="file"
-            accept="image/*"
-            onChange={handlePhotoUpload}
-            style={{ display: 'none' }}
-            aria-hidden="true"
-          />
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoUpload} style={{ display: 'none' }} aria-hidden="true" />
+          <input ref={photoRef} type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} aria-hidden="true" />
 
           {/* Camera button */}
           <button
             className="camera-btn"
-            onClick={handleCameraClick}
+            onClick={() => fileRef.current?.click()}
             disabled={isPending}
             title="Subir foto de tabla nutricional"
             aria-label="Subir foto"
@@ -288,23 +277,44 @@ export default function UniversalInput() {
             <Image size={18} />
           </button>
 
-          {/* Text Input */}
+          {/* Text Input + Send */}
           <form onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', gap: '0.5rem' }}>
-            <input
-              className="universal-input"
-              type="text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder='Ej: "Comí 2 huevos revueltos con tostadas"'
-              disabled={isPending}
-              autoComplete="off"
-              autoCapitalize="sentences"
-              id="input-universal"
-              aria-label="Registrar comida"
-            />
+            <div style={{ flex: 1, position: 'relative' }}>
+              <input
+                className="universal-input"
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder='¿Qué comiste?'
+                disabled={isPending}
+                autoComplete="off"
+                autoCapitalize="sentences"
+                id="input-universal"
+                aria-label="Registrar comida"
+              />
+              {/* Chat toggle when minimized */}
+              {!chatOpen && chatMessages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  style={{
+                    position: 'absolute', right: '0.625rem', top: '50%', transform: 'translateY(-50%)',
+                    background: 'var(--color-primary-bg)',
+                    border: 'none', borderRadius: 'var(--radius-full)',
+                    padding: '0.2rem 0.5rem',
+                    display: 'flex', alignItems: 'center', gap: '0.25rem',
+                    cursor: 'pointer',
+                    fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-primary)',
+                  }}
+                  aria-label="Ver conversación"
+                >
+                  <MessageSquare size={11} />
+                  {chatMessages.length}
+                </button>
+              )}
+            </div>
 
-            {/* Send button */}
             <button
               type="submit"
               className="send-btn"
@@ -313,11 +323,7 @@ export default function UniversalInput() {
               aria-label="Registrar comida"
               id="btn-send"
             >
-              {isPending ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <Send size={18} />
-              )}
+              {isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
             </button>
           </form>
         </div>
